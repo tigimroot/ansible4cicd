@@ -1,7 +1,7 @@
 ---
 - hosts: all
   vars:
-    - destdir: /opt/jenkins/
+    - destdir: /opt/jenkins
   become: true
 
   tasks:
@@ -96,3 +96,15 @@
       docker_container:
         name: "jenkins_CI_CD"
         state: started
+
+    - name: Check container
+      wait_for:
+         port: 80
+         delay: 10
+
+    - name: Store pass to variable
+      ansible.builtin.slurp:
+         src: "{{ destdir }}/secrets/initialAdminPassword"
+      register: initialAdminPassword
+
+    - debug: msg="the value of initial password is {{ initialAdminPassword['content'] | b64decode }}"
