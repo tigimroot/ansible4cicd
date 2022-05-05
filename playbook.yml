@@ -89,7 +89,7 @@
         name: "jenkins_CI_CD"
         image: "jenkins/jenkins"
         volumes: /opt/jenkins:/var/jenkins_home:rw
-        published_ports: 192.168.247.82:80:8080
+        published_ports: 80:8080
         state: present
 
     - name: Start a container
