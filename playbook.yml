@@ -1,6 +1,9 @@
 ---
 - hosts: all
+  vars:
+    - destdir: /opt/jenkins/
   become: true
+
   tasks:
     - name: Make sure we have a 'developers' group
       group:
@@ -64,11 +67,32 @@
 
     - name: Pull default Docker image
       docker_image:
-        name: "jenkins"
+        name: "jenkins/jenkins:lts-jdk11"
         source: pull
 
-    - name: Create default containers
+    - name: Add a user jenkins with UID 1000 to host into developers group
+      user:
+        name: jenkins
+        groups: developers
+        append: no
+
+    - name: Creates directory
+      file:
+       path: "{{ destdir }}"
+       state: directory
+       owner: tigimroot
+       group: developers
+       mode: 0722
+
+    - name: Create container from dockerfile
       docker_container:
-        name: "jenkins CI_CD"
-        image: "Jenkins"
+        name: "jenkins_CI_CD"
+        image: "jenkins/jenkins"
+        volumes: /opt/jenkins:/var/jenkins_home:rw
+        published_ports: 192.168.247.82:80:8080
         state: present
+
+    - name: Start a container
+      docker_container:
+        name: "jenkins_CI_CD"
+        state: started
