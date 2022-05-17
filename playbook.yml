@@ -1,16 +1,14 @@
 ---
 - hosts: all
-  vars:
-    - destdir: /opt/jenkins
   become: true
 
   tasks:
-    - name: Make sure we have a 'developers' group
+    - name: Global - Make sure we have a 'developers' group
       group:
        name: developers
        state: present
 
-    - name: Allow developers group to have passwordless sudo
+    - name: Global - Allow developers group to have passwordless sudo
       lineinfile:
        dest: /etc/sudoers
        state: present
@@ -18,7 +16,7 @@
        line: '%developers ALL=(ALL) NOPASSWD: ALL'
        validate: 'visudo -cf %s'
 
-    - name: Add sudoers users to developers group
+    - name: Global - Add sudoers users to developers group
       user:
          name=tigimroot
          groups=developers
@@ -26,13 +24,35 @@
          state=present
          createhome=yes
 
-    - name: Install aptitude
+- hosts: cicdvm
+  become: true
+  vars:
+    - destdirjenkins: /opt/jenkins
+    - destdirdr: /opt/registry
+    - destdirk3s: /data
+    - k3snodeip : "{{ hostvars['k3snode1']['ansible_facts']['eth0']['ipv4']['address'] }}"
+
+  tasks:
+    - name: Jenkins - Add a user jenkins with UID 1000 to host into developers group
+      user:
+          name: jenkins
+          groups: developers
+          append: no
+
+    - name: cicdvm - Add registry user
+      ansible.builtin.user:
+       name: registry
+       comment: docker registry user
+       uid: 1001
+       group: developers
+
+    - name: cicdvm - Install aptitude
       apt:
         name: aptitude
         state: latest
         update_cache: true
 
-    - name: Install required system packages
+    - name: cicdvm - Install required system packages
       apt:
         pkg:
           - apt-transport-https
@@ -45,66 +65,106 @@
         state: latest
         update_cache: true
 
-    - name: Add Docker GPG apt Key
+    - name: cicdvm - Add Docker GPG apt Key
       apt_key:
         url: https://download.docker.com/linux/ubuntu/gpg
         state: present
 
-    - name: Add Docker Repository
+    - name: cicdvm - Add Docker Repository
       apt_repository:
-        repo: deb https://download.docker.com/linux/ubuntu focal stable
-        state: present
+         repo: deb https://download.docker.com/linux/ubuntu focal stable
+         state: present
 
-    - name: Update apt and install docker-ce
+    - name: cicdvm - Update apt and install docker-ce
       apt:
         name: docker-ce
         state: latest
         update_cache: true
 
-    - name: Install Docker Module for Python
+    - name: cicdvm - Install Docker Module for Python
       pip:
-        name: docker
+         name: docker
 
-    - name: Pull default Docker image
+    - name: cicdvm - Pull default Jenkins image
       docker_image:
         name: "jenkins/jenkins:lts-jdk11"
         source: pull
 
-    - name: Add a user jenkins with UID 1000 to host into developers group
-      user:
-        name: jenkins
-        groups: developers
-        append: no
-
-    - name: Creates directory
+    - name: cicdvm - Creates Jenkins directory
       file:
-       path: "{{ destdir }}"
-       state: directory
-       owner: tigimroot
-       group: developers
-       mode: 0722
+        path: "{{ destdirjenkins }}"
+        state: directory
+        owner: tigimroot
+        group: developers
+        mode: 0722
 
-    - name: Create container from dockerfile
+    - name: cicdvm - Create Jenkins container
       docker_container:
         name: "jenkins_CI_CD"
         image: "jenkins/jenkins"
         volumes: /opt/jenkins:/var/jenkins_home:rw
-        published_ports: 80:8080
+        published_ports: 8080:8080
         state: present
 
-    - name: Start a container
+    - name: cicdvm - Start Jenkins container
       docker_container:
         name: "jenkins_CI_CD"
         state: started
 
-    - name: Check container
-      wait_for:
-         port: 80
-         delay: 10
-
-    - name: Store pass to variable
+    - name: cicdvm - Store Jenkins pass to variable
       ansible.builtin.slurp:
-         src: "{{ destdir }}/secrets/initialAdminPassword"
+         src: "{{ destdirjenkins }}/secrets/initialAdminPassword"
       register: initialAdminPassword
 
     - debug: msg="the value of initial password is {{ initialAdminPassword['content'] | b64decode }}"
+
+    - name: cicdvm - Creates Registry directory
+      file:
+         path: "{{ destdirdr }}"
+         state: directory
+         owner: registry
+         group: developers
+         mode: 0755
+
+    - name: cicdvm - Create Registry container
+      docker_container:
+        name: "Registry2_CI_CD"
+        image: "amd64/registry:2"
+        volumes: /opt/registry:/var/lib/registry:rw
+        published_ports: 5000:5000
+        state: present
+
+    - name: cicdvm - Start a Registry container
+      docker_container:
+            name: "Registry2_CI_CD"
+            state: started
+
+    - name: cicdvm - check a Registry
+      shell: "docker pull alpine && docker tag alpine localhost:5000/alpine && docker push localhost:5000/alpine > /opt/registry/stdout.txt"
+
+    - name: cicdvm - Store docker output to variable
+      ansible.builtin.slurp:
+        src: "/opt/registry/stdout.txt"
+      register: checkregistry
+    - debug:
+        msg : "docker push out = {{ checkregistry['content'] | b64decode }}"
+
+    - name: cicdvm - Creates nfs directory
+      file:
+         path: "{{ destdirk3s }}"
+         state: directory
+         owner: registry
+         group: developers
+         mode: 0755
+
+    - name: cicdvm - apt nfs install
+      apt: name=nfs-kernel-server state=present
+
+    - name: cicdvm - enable and start nfs
+      shell: "systemctl enable nfs-server && systemctl start nfs-server"
+
+    - debug:
+       msg : "Ip adress for exports = {{ k3snodeip }}"
+
+    - name: modify nfs server /ets/exports
+      shell: "[ -e /etc/exports ] && echo '/data {{ k3snodeip }}(rw,no_root_squash,sync)' > /etc/exports && exportfs -r"
