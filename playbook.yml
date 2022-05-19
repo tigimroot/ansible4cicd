@@ -1,28 +1,11 @@
 ---
-- hosts: all
-  become: true
-
+- hosts: k3snode
   tasks:
-    - name: Global - Make sure we have a 'developers' group
-      group:
-       name: developers
-       state: present
-
-    - name: Global - Allow developers group to have passwordless sudo
-      lineinfile:
-       dest: /etc/sudoers
-       state: present
-       regexp: '^%developers'
-       line: '%developers ALL=(ALL) NOPASSWD: ALL'
-       validate: 'visudo -cf %s'
-
-    - name: Global - Add sudoers users to developers group
-      user:
-         name=tigimroot
-         groups=developers
-         append=yes
-         state=present
-         createhome=yes
+    - name: Collect only selected facts
+      ansible.builtin.setup:
+        filter:
+        - 'network'
+      tags: [ 'new' , 'maintanance' ]
 
 - hosts: cicdvm
   become: true
@@ -33,11 +16,36 @@
     - k3snodeip : "{{ hostvars['k3snode1']['ansible_facts']['eth0']['ipv4']['address'] }}"
 
   tasks:
+    - name: Global - Make sure we have a 'developers' group
+      group:
+       name: developers
+       state: present
+      tags: [ 'new' ]
+
+    - name: Global - Allow developers group to have passwordless sudo
+      lineinfile:
+       dest: /etc/sudoers
+       state: present
+       regexp: '^%developers'
+       line: '%developers ALL=(ALL) NOPASSWD: ALL'
+       validate: 'visudo -cf %s'
+      tags: [ 'new' ]
+
+    - name: Global - Add sudoers users to developers group
+      user:
+         name=tigimroot
+         groups=developers
+         append=yes
+         state=present
+         createhome=yes
+      tags: [ 'new' ]
+
     - name: Jenkins - Add a user jenkins with UID 1000 to host into developers group
       user:
           name: jenkins
           groups: developers
           append: no
+      tags: [ 'new' ]
 
     - name: cicdvm - Add registry user
       ansible.builtin.user:
@@ -45,12 +53,14 @@
        comment: docker registry user
        uid: 1001
        group: developers
+      tags: [ 'new' ]
 
     - name: cicdvm - Install aptitude
       apt:
         name: aptitude
         state: latest
         update_cache: true
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Install required system packages
       apt:
@@ -64,31 +74,37 @@
           - python3-setuptools
         state: latest
         update_cache: true
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Add Docker GPG apt Key
       apt_key:
         url: https://download.docker.com/linux/ubuntu/gpg
         state: present
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Add Docker Repository
       apt_repository:
          repo: deb https://download.docker.com/linux/ubuntu focal stable
          state: present
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Update apt and install docker-ce
       apt:
         name: docker-ce
         state: latest
         update_cache: true
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Install Docker Module for Python
       pip:
          name: docker
+      tags: [ 'new' ]
 
     - name: cicdvm - Pull default Jenkins image
       docker_image:
         name: "jenkins/jenkins:lts-jdk11"
         source: pull
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Creates Jenkins directory
       file:
@@ -97,26 +113,31 @@
         owner: tigimroot
         group: developers
         mode: 0722
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Create Jenkins container
       docker_container:
         name: "jenkins_CI_CD"
         image: "jenkins/jenkins"
         volumes: /opt/jenkins:/var/jenkins_home:rw
-        published_ports: 8080:8080
+        published_ports: 80:8080
         state: present
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Start Jenkins container
       docker_container:
         name: "jenkins_CI_CD"
         state: started
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Store Jenkins pass to variable
       ansible.builtin.slurp:
          src: "{{ destdirjenkins }}/secrets/initialAdminPassword"
       register: initialAdminPassword
+      tags: [ 'new' ]
 
     - debug: msg="the value of initial password is {{ initialAdminPassword['content'] | b64decode }}"
+      tags: [ 'new' ]
 
     - name: cicdvm - Creates Registry directory
       file:
@@ -125,6 +146,7 @@
          owner: registry
          group: developers
          mode: 0755
+      tags: [ 'new' ]
 
     - name: cicdvm - Create Registry container
       docker_container:
@@ -133,21 +155,31 @@
         volumes: /opt/registry:/var/lib/registry:rw
         published_ports: 5000:5000
         state: present
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Start a Registry container
       docker_container:
             name: "Registry2_CI_CD"
             state: started
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - check a Registry
       shell: "docker pull alpine && docker tag alpine localhost:5000/alpine && docker push localhost:5000/alpine > /opt/registry/stdout.txt"
+      tags: [ 'new' , 'maintanance' ]
+
+    - name: cicdvm - del image from  Registry
+      shell: "docker image rmi alpine && docker image rmi localhost:5000/alpine"
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Store docker output to variable
       ansible.builtin.slurp:
         src: "/opt/registry/stdout.txt"
       register: checkregistry
+      tags: [ 'new' , 'maintanance' ]
+
     - debug:
         msg : "docker push out = {{ checkregistry['content'] | b64decode }}"
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - Creates nfs directory
       file:
@@ -156,15 +188,25 @@
          owner: registry
          group: developers
          mode: 0755
+      tags: [ 'new' ]
 
     - name: cicdvm - apt nfs install
-      apt: name=nfs-kernel-server state=present
+      apt:
+         name: nfs-kernel-server
+         state: latest
+      tags: [ 'new' , 'maintanance' ]
 
     - name: cicdvm - enable and start nfs
       shell: "systemctl enable nfs-server && systemctl start nfs-server"
+      tags: [ 'new' , 'maintanance' ]
 
     - debug:
        msg : "Ip adress for exports = {{ k3snodeip }}"
+      tags: [ 'new' , 'maintanance' ]
 
     - name: modify nfs server /ets/exports
-      shell: "[ -e /etc/exports ] && echo '/data {{ k3snodeip }}(rw,no_root_squash,sync)' > /etc/exports && exportfs -r"
+      copy:
+        dest: "/etc/exports"
+        content: |
+         /data {{ k3snodeip }}(rw,no_root_squash,sync)
+      tags: [ 'new' , 'maintanance' ]
