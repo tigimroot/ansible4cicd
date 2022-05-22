@@ -119,10 +119,11 @@
       docker_container:
         name: "jenkins_CI_CD"
         image: "jenkins/jenkins"
-        volumes: /opt/jenkins:/var/jenkins_home:rw
+        volumes:
+          /opt/jenkins:/var/jenkins_home:rw
         published_ports: 80:8080
         state: present
-      tags: [ 'new' , 'maintanance' ]
+      tags: [ 'new' ]
 
     - name: cicdvm - Start Jenkins container
       docker_container:
