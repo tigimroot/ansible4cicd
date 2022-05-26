@@ -1,0 +1,7 @@
+# VM on Hyper-v Server for CI\CD Process
+[cicdvm]
+cicdvm1 ansible_host=172.24.235.52 
+
+# VM on Hyper-v Server for k3s
+[k3snode]
+k3snode1  ansible_host=172.24.230.198
